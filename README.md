@@ -81,4 +81,4 @@ Contributions are welcome! Feel free to submit issues or pull requests to improv
 ---
 
 ## License
-This project is licensed under the MIT License. See the [LICENSE](./LICENSE) file for details.
+This project is dedicated to the public domain under the Creative Commons Zero (CC0) license. See the [LICENSE](LICENSE) file for details.
