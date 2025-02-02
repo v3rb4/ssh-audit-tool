@@ -81,7 +81,7 @@ def ssh_brute_force(host, port, username, password_list, logger, delay_between_a
 end
 
 # Main execution
-start_message = "=== Starting SSH audit tool ==="
+start_message = "=== SSH Brute Force ==="
 puts start_message
 logger.info(start_message)
 
